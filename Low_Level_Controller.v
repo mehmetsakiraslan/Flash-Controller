@@ -294,10 +294,9 @@ output              out_qspi_sck   // On rising edge: Latches commands, addresse
                             bit_ctr_next    = 32'd32            ;
                             r_qspi_fifo_next= {1'b0, r_spd_nv ? 8'h32 : 8'h02, r_address};         
                         end
-                        else if(q_rd_flag) begin
-                            q_rd_flag_next  = 1'b0      ;
-                            state_next      = QSPI_WRR  ;
-                            bit_ctr_next    = 32'd24    ;  
+                        else begin
+                            state_next      =  QSPI_WRR ;
+                            bit_ctr_next    =  32'd24   ;  
                             r_qspi_fifo_next= {1'b0, 8'h01, 16'b0000_0010_0000_0010, {8{1'b0}}}    ;   // yanlis olabilir 
                         end           
                     end
@@ -321,11 +320,16 @@ output              out_qspi_sck   // On rising edge: Latches commands, addresse
                 if(bit_ctr == 32'd0) begin
                     r_qspi_sck_next = 1'b0          ;
                     if(r_qspi_cs) begin
-                        q_rd_flag_next  = 1'b1      ;
+                        if(r_spd_nv)begin
+                            wrr_flag_next   = 1'b1      ;
+                        end
+                        else begin
+                            q_rd_flag_next  = 1'b1  ;
+                        end
                         r_qspi_cs_next  = 1'b0      ;
-                        bit_ctr_next    = 32'd24     ;   
+                        bit_ctr_next    = 32'd16    ;   
                         state_next      = QSPI_RDSR ;
-                        r_qspi_fifo_next= {1'b0,8'h05,{24{1'b1}}} ;  // rdsr command
+                        r_qspi_fifo_next= {1'b0,8'h05,{24{1'b0}}} ;  // rdsr command
                     end
                     
                     else begin
@@ -347,55 +351,62 @@ output              out_qspi_sck   // On rising edge: Latches commands, addresse
             begin
                 if(bit_ctr == 32'd0) begin 
                     if(r_qspi_fifo[0] == 1'b0) begin
-                        r_qspi_sck_next = 1'b0          ;
-                        if(wrr_flag) begin // wrr isleminden sonra
-                            wrr_flag_next   = 1'b0      ;
-                            r_qspi_cs_next  = 1'b0      ;
-                            
-                            state_next      = QSPI_WREN ;
-                            erase_flag_next = 1'b1      ;
-                            r_qspi_fifo_next= {1'b0, 8'h06,{24{1'b0}}} ;
-                            bit_ctr_next    = 32'd8     ;  
-                        end     
-                        else if(write_flag) begin // QSPI_WRITE isleminden sonra
-                            write_flag_next = 1'b0      ;
-                            bit_ctr_next    = 32'd0     ;  
-                            state_next      =  IDLE     ;   
-                            r_qspi_cs_next  = 1'b1      ;
+                        if(r_qspi_cs_next) begin
+                            r_qspi_sck_next = 1'b0          ;
+                            if(wrr_flag) begin // wrr isleminden sonra
+                                wrr_flag_next   = 1'b0      ;
+                                r_qspi_cs_next  = 1'b0      ;
+                                
+                                state_next      = QSPI_WREN ;
+                                erase_flag_next = 1'b1      ;
+                                r_qspi_fifo_next= {1'b0, 8'h06,{24{1'b0}}} ;
+                                bit_ctr_next    = 32'd8     ;  
+                            end     
+                            else if(write_flag) begin // QSPI_WRITE isleminden sonra
+                                write_flag_next = 1'b0      ;
+                                bit_ctr_next    = 32'd0     ;  
+                                state_next      =  IDLE     ;   
+                                r_qspi_cs_next  = 1'b1      ;
+                            end
+                            else if(erase_flag) begin  // erase isleminden sonra 
+                                erase_flag_next = 1'b0      ;
+                                r_qspi_cs_next  = 1'b0      ;
+                                state_next      = QSPI_WREN ;
+                                write_flag_next = 1'b1      ;
+                                r_qspi_fifo_next= {1'b0, 8'h06,{24{1'b0}}} ;
+                                bit_ctr_next    = 32'd8     ;  
+                            end
+                            else if(q_rd_flag) begin
+                                q_rd_flag_next  = 1'b0          ;
+                                state_next      = SEND_CMD      ; 
+                                r_qspi_sck_next = 1'b0          ;       
+                                bit_ctr_next    = 32'd32        ;
+                                r_qspi_fifo_next= {1'b0, 8'h6b, r_address_next};  
+                            end
                         end
-                        else if(erase_flag) begin  // erase isleminden sonra 
-                            erase_flag_next = 1'b0      ;
-                            r_qspi_cs_next  = 1'b0      ;
-                            state_next      = QSPI_WREN ;
-                            write_flag_next = 1'b1      ;
-                            r_qspi_fifo_next= {1'b0, 8'h06,{24{1'b0}}} ;
-                            bit_ctr_next    = 32'd8     ;  
-                        end
-                        else if(q_rd_flag) begin
-                            q_rd_flag_next  = 1'b0          ;
-                            state_next      = SEND_CMD      ; 
-                            r_qspi_sck_next = 1'b0          ;       
-                            bit_ctr_next    = 32'd32        ;
-                            r_qspi_fifo_next= {1'b0, 8'h6b, r_address_next};  
+                        else begin
+                            state_next      = QSPI_RDSR         ;
+                            r_qspi_cs_next  = 1'b1              ;                      
                         end
                     end
                     else begin // eger 0 degilse okumaya devam et      //////// calısıyormu kontrol et
                         r_qspi_sck_next = 1'b0              ;
                         state_next      = QSPI_RDSR         ;
-                        r_qspi_fifo_next= {r_qspi_fifo[32:16],16'd0} ;
+                        r_qspi_fifo_next= {r_qspi_fifo[32:8],8'd0} ;
                         bit_ctr_next    = 32'd8             ;      
                     end
                 end
                 else begin
                     r_qspi_sck_next = ~r_qspi_sck   ;
                     state_next      =  QSPI_RDSR    ; 
-                    if((!r_qspi_sck) && (bit_ctr > 16)) begin
+                    if((!r_qspi_sck) && (bit_ctr > 8)) begin
                         bit_ctr_next    = bit_ctr - 32'd1       ;
                         r_qspi_fifo_next= {r_qspi_fifo[31:0],1'b0};
                     end
-                    else if((!r_qspi_sck) && (bit_ctr <= 16)) begin
-                        r_qspi_fifo_next  = {r_qspi_fifo[31:0], io_qspi_data[1]} ; // r_qspi_fifo ile yap
-                        bit_ctr_next        = bit_ctr - 32'd1                    ;  
+                    else if((!r_qspi_sck) && (bit_ctr <= 8)) begin
+                        r_qspi_fifo_next  = {r_qspi_fifo[31:0], io_qspi_data[1]}; // r_qspi_fifo ile yap
+                        bit_ctr_next        = bit_ctr - 32'd1                   ;  
+                        r_qspi_sck_next     = 1'b0                              ;
                     end 
                 end
             end
