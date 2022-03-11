@@ -62,7 +62,8 @@ output              out_qspi_sck   // On rising edge: Latches commands, addresse
     QSPI_WRR	=16'h0040      ,
     QSPI_WREN	=16'h0080      ,
     QSPI_ERASE	=16'h0100      ,
-    QSPI_RDSR	=16'h0200              ;
+    QSPI_RDSR	=16'h0200      ,
+    QSPI_START  =16'h0400        ;
       
     // QSPI cihazına bağlı shift register
     reg [35:0]  r_qspi_fifo, r_qspi_fifo_next   ;
@@ -137,16 +138,16 @@ output              out_qspi_sck   // On rising edge: Latches commands, addresse
             clock_ctr_next  = `PRESCALE - 32'd1        ; 
             case(state)
             
-            IDLE: 
+            QSPI_START:
             begin
-                if(startup_sequence && (!i_reset)) begin
                     if(bit_ctr == 32'd0) begin
                         state_next = IDLE;
                         startup_sequence_next = 1'b0;
+                        r_qspi_cs_next  = 1'b1;
                     end
                     else begin
                         
-                        state_next = IDLE;
+                        state_next = QSPI_START;
                         if(bit_ctr == 501) begin
                              bit_ctr_next   = bit_ctr - 32'd1           ;
                              r_qspi_cs_next = 1'b0;          
@@ -159,18 +160,17 @@ output              out_qspi_sck   // On rising edge: Latches commands, addresse
                                 r_qspi_fifo_next    = {r_qspi_fifo[34:0],1'b0}  ;    
                             end
                         end
-                        else if(bit_ctr > 400) begin
-                            r_qspi_cs_next      = 1'b1          ;
-                            r_qspi_sck_next     = 1'b0              ;
-                            bit_ctr_next        = bit_ctr - 32'd1   ;
-                            r_qspi_fifo_next    = {4'b0, 8'h30,1'b0};        
-                        end
-                        else if(bit_ctr > 392) begin
+                        else if(bit_ctr > 468) begin
                             r_qspi_sck_next     = ~r_qspi_sck   ;
                             if(!r_qspi_sck) begin    
                                 bit_ctr_next        = bit_ctr - 32'd1           ;
                                 r_qspi_fifo_next    = {r_qspi_fifo[34:0],1'b0}  ;    
                             end
+                              
+                        end
+                        else if(bit_ctr > 10) begin
+                            r_qspi_sck_next     = ~r_qspi_sck   ;
+                            bit_ctr_next        = bit_ctr - 32'd1           ;
                         end
                         else begin
                             bit_ctr_next        = bit_ctr - 32'd1           ;
@@ -179,6 +179,13 @@ output              out_qspi_sck   // On rising edge: Latches commands, addresse
                             r_qspi_sck_next     = 1'b0          ;
                         end
                     end
+            end
+            
+            IDLE: 
+            begin
+                if(startup_sequence && (!i_reset)) begin
+                    state_next  = QSPI_START                ; 
+                    bit_ctr_next= 32'd501                   ;
                 end
                 else begin
                     if((in_write)) begin //
@@ -191,7 +198,7 @@ output              out_qspi_sck   // On rising edge: Latches commands, addresse
                         r_op_cont_next  = in_op_cont        ; 
                         r_qspi_sck_next = 1'b0              ; 
                         if(r_spd_nv) begin // Qspi write
-                            bit_ctr_next    = 32'd9         ;
+                            bit_ctr_next    = 32'd16         ;
                             state_next      = QSPI_WREN     ;   // WREN -> WRR -> RDSR -> WREN -> SECTOR ERASE -> RDSR -> WREN-> SEND CMD -> WRITE -> RDSR
                             r_qspi_fifo_next= { 4'b0, 8'h06,{24{1'b0}}} ; 
                             if(!r_dir_nv) begin // qspi read mode
@@ -202,7 +209,7 @@ output              out_qspi_sck   // On rising edge: Latches commands, addresse
                         else if(!r_spd_nv && r_dir_nv) begin // Spi write
                             state_next      = QSPI_WREN     ;
                             erase_flag_next = 1'b1          ;        
-                            bit_ctr_next    = 32'd9         ;
+                            bit_ctr_next    = 32'd16         ;
                             r_qspi_fifo_next= {4'b0, 8'h06,{24{1'b0}}} ;
                         end
                         
@@ -328,8 +335,7 @@ output              out_qspi_sck   // On rising edge: Latches commands, addresse
             QSPI_WREN:  // 9.9: yazma işlemlerinden once yapılmalı
             begin
                 if(bit_ctr == 32'd0) begin
-                    r_qspi_sck_next = 1'b0          ;
-                   
+                        r_qspi_sck_next = 1'b0          ;
                         r_qspi_cs_next  = 1'b0      ;
                         if(erase_flag) begin
                             erase_flag_next = 1'b0              ;
@@ -348,12 +354,10 @@ output              out_qspi_sck   // On rising edge: Latches commands, addresse
                             bit_ctr_next    =  32'd25   ;  
                             r_qspi_fifo_next= {4'b0, 8'h01, 16'b0000_0010_0000_0010, {8{1'b0}}}    ;   // yanlis olabilir 
                         end           
-                    
-                    
                 end
                 else begin ///// 1 ms delay ekle
                     state_next      =  QSPI_WREN    ;
-                    if(bit_ctr > 1) begin
+                    if(bit_ctr > 8) begin
                         r_qspi_sck_next = ~r_qspi_sck   ;
                         if(!r_qspi_sck) begin
                             bit_ctr_next    = bit_ctr - 32'd1       ;
@@ -363,7 +367,7 @@ output              out_qspi_sck   // On rising edge: Latches commands, addresse
                     else begin
                         bit_ctr_next    = bit_ctr - 32'd1;
                         r_qspi_sck_next = 1'b0;
-                        
+                        r_qspi_cs_next  = 1'b1;
                     end
                     
                 end
@@ -392,7 +396,6 @@ output              out_qspi_sck   // On rising edge: Latches commands, addresse
                     //end       
                 end
                 else begin
-                    
                     state_next      =  QSPI_WRR     ; 
                     if(bit_ctr > 1) begin
                         r_qspi_sck_next = ~r_qspi_sck   ;
@@ -568,7 +571,7 @@ output              out_qspi_sck   // On rising edge: Latches commands, addresse
     always@(posedge i_clk) begin
         if(i_reset) begin
             clock_ctr   <= `PRESCALE - 32'd1;
-            bit_ctr     <= 32'd501          ;
+            bit_ctr     <= 32'd0            ;
             state       <= IDLE             ;
             
             erase_flag  <= 1'b0             ;
