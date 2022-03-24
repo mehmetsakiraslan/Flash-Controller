@@ -1,669 +1,204 @@
 `timescale 1ns / 1ps
-//////////////////////////////////////////////////////////////////////////////////
-// Company: 
-// Engineer: 
-// 
-// Create Date: 26.01.2022 10:51:35
-// Design Name: 
-// Module Name: Low_Level_Controller
-// Project Name: 
-// Target Devices: 
-// Tool Versions: 
-// Description: 
-// 
-// Dependencies: 
-// 
-// Revision:
-// Revision 0.01 - File Created
-// Additional Comments:
-// 
-//////////////////////////////////////////////////////////////////////////////////
 
 
-// Defined Flash Modes
-`define	MOD_SPI	    3'b001
-`define	MOD_QOUT	3'b010
-`define	MOD_QIN	    3'b100
+module Top_Module_for_Test(
+input            i_clk, // Sistem frekansına sahip clock
+input            i_reset,          
 
-`define DUMMY_CYCLE     4'd8
-`define ADDRESS_SIZE    5'd24
-`define PRESCALE        32'd5
-
-
-module Low_Level_Controller_4(
-input               i_clk,          // Sistem frekansına sahip clock
-input               i_reset,
-
-// Üst seviye cihaza bağlı kontrol sinyalleri
-input                in_write,       // İletimin başlayacağını gösterir
-input                in_op_cont,     // İşlemin devam ettiğini gösterir 
-input  [23:0]        in_address,  
-input  [31:0]        in_word,        // Write modda flasha yazılacak veri 
-input                in_spd,         // 0 -> SPI, 1 -> QSPI
-input                in_dir,         // 0 -> read, 1 -> write
-output [31:0]        out_word,       // Read modda flashtan okunan veri
-output               out_valid,
-//output               out_busy,
-
-// Flash Cihazına Bağlı Giriş/Çıkışlar
+// Flash Controller i/o
 inout  [3:0]        io_qspi_data,
-output              out_qspi_cs,    // When driven low, places device in active power mode. 
-output              out_qspi_sck   // On rising edge: Latches commands, addresses, and data on SI, On falling edge: Triggers output on SO 
+output              out_qspi_cs
 
+ 
     );
     
-    localparam [15:0] 
-    IDLE        =16'h0001      ,
-    SEND_CMD    =16'h0002      ,
-    SPI_READ    =16'h0004      ,
-    QSPI_READ   =16'h0008      ,
-    SPI_WRITE 	=16'h0010      ,
-    QSPI_WRITE  =16'h0020      ,
-    QSPI_WRR	=16'h0040      ,
-    QSPI_WREN	=16'h0080      ,
-    QSPI_ERASE	=16'h0100      ,
-    QSPI_RDSR	=16'h0200      ,
-    QSPI_START  =16'h0400        ;
-      
-    // QSPI cihazına bağlı shift register
-    reg [35:0]  r_qspi_fifo, r_qspi_fifo_next   ;
-
-    // Giriş registerları
-    reg         r_spd, r_spd_next           ;   
-    reg         r_dir, r_dir_next           ;
-    reg         r_spd_v, r_spd_nv           ;
-    reg         r_dir_v, r_dir_nv           ; 
-    reg [23:0]  r_address, r_address_next   ; 
-    
-   assign      io_qspi_data = (!r_spd) ? ({2'b11,1'bZ,r_qspi_fifo[32]})                  
-                                           : (r_dir ? {(r_qspi_fifo[35:32])}:{(4'bZZZZ)} )  ;// dir==0 -> okuma, spd==0 -> spı     
-   
-                                            
-    // Çıkış Registerları
-    reg [31:0]  r_out_word, r_out_word_next ;
-    reg         r_valid   , r_valid_next    ;
-    
-    reg         r_qspi_cs , r_qspi_cs_next  ; 
-    reg         r_qspi_sck, r_qspi_sck_next ;
-    reg         r_qspi_sr, r_qspi_sr_next   ;   // 1 i_clk cycle retarted sck to prevent race conditions while driving slave device,
-                                                // would not work if prescale is 1.
-    
-    assign      out_word    = r_out_word    ;   
-    assign      out_valid   = r_valid       ;
-    //assign      out_busy    = r_busy        ;  
-    
-    assign      out_qspi_cs = r_qspi_cs     ;
-    assign      out_qspi_sck= r_qspi_sr     ;     
-            
-    // Kontrol Sinyalleri
-    reg [31:0]  bit_ctr  , bit_ctr_next     ;  
-    reg [15:0]  state    , state_next       ; 
-    reg [31:0]  clock_ctr, clock_ctr_next   ;
-    reg         erase_flag, erase_flag_next ;
-    reg         write_flag, write_flag_next ;
-    reg         wrr_flag, wrr_flag_next     ;
-    reg         r_op_cont, r_op_cont_next   ;
-    reg         q_rd_flag, q_rd_flag_next   ;
-    
-    reg         startup_sequence,startup_sequence_next;
+ reg               i_dir;
+ reg               i_spd;
+ reg               in_write  ;
+ reg               in_op_cont;
+ reg [23:0]        in_address;
+ reg [31:0]        in_word   ;
+ 
+ 
+ 
+ wire [31:0]       t_out_word;           
+ wire              out_valid ;
+ 
+ //wire              out_qspi_sck;
+ 
+ reg [31:0] counter;
+ reg [11:0] t_state;
+ 
+ wire out_qspi_sck; 
+ 
+ wire out_busy    ;
+ reg in_erase;
+ 
+  LLC_AXI a1(
+   .i_clk(i_clk)  ,       
+   .i_reset(i_reset),                                                           
+                                                                      
+   .in_write(in_write),  
+   .in_op_cont(in_op_cont),                                                        
+   .in_address(in_address),                                                        
+   .in_word(in_word),                                                           
+   .in_spd(i_spd),                                                            
+   .in_dir(i_dir),
+   .in_erase(in_erase),                                                            
+   .out_word(t_out_word),                                                          
+   .out_valid(out_valid),                                                                                                                  
+   .out_busy(out_busy),                                                                   
+   .io_qspi_data(io_qspi_data),                                                      
+   .out_qspi_cs(out_qspi_cs),
+   .out_qspi_sck(out_qspi_sck)                                                  
+  );                                                             
   
-                
-    always@* begin
-        bit_ctr_next        = bit_ctr       ;
-        clock_ctr_next      = clock_ctr     ; 
-        state_next          = state         ;
-      
-        r_qspi_fifo_next    = r_qspi_fifo   ;
-        r_qspi_sck_next     = r_qspi_sck    ;
-        r_qspi_cs_next      = r_qspi_cs     ;
-        
-        r_dir_next          = r_dir         ;
-        r_spd_next          = r_spd         ;
-        
-        r_dir_nv            = r_dir_v       ;
-        r_spd_nv            = r_spd_v       ;
-      
-        r_out_word_next     = r_out_word    ;
-        r_valid_next        = r_valid       ;
-        //r_busy_next         = r_busy        ;
-        r_address_next      = r_address     ;
-        r_op_cont_next      = r_op_cont     ;
-        
-        startup_sequence_next = startup_sequence;
-        
-        wrr_flag_next       = wrr_flag      ;
-        write_flag_next     = write_flag    ;
-        erase_flag_next     = erase_flag    ;
-        write_flag_next     = write_flag    ;
-        q_rd_flag_next      = q_rd_flag     ;
-        
-        r_qspi_sr_next  = r_qspi_sck               ;
-        
-        if(clock_ctr > 0) begin
-            clock_ctr_next  = clock_ctr - 32'd1        ;
-            
-        end
-        else if(clock_ctr == 32'd0) begin
-            clock_ctr_next  = `PRESCALE - 32'd1        ; 
-            
-            case(state)
-            
-            QSPI_START:
-            begin
-                    if(bit_ctr == 32'd0) begin
-                        state_next = IDLE;
-                        startup_sequence_next = 1'b0;
-                        r_qspi_cs_next  = 1'b1;
-                    end
-                    else begin
-                        
-                        state_next = QSPI_START;
-                        if(bit_ctr == 501) begin
-                             bit_ctr_next   = bit_ctr - 32'd1   ;
-                             r_qspi_cs_next = 1'b0;          
-                        end
-                        
-                        else if(bit_ctr > 452) begin
-                            r_qspi_sck_next     = ~r_qspi_sck   ;
-                            if(!r_qspi_sck) begin    
-                                bit_ctr_next        = bit_ctr - 32'd1           ;
-                                r_qspi_fifo_next    = {r_qspi_fifo[34:0],1'b0}  ;    
-                            end
-                        end
-                        else if(bit_ctr > 400) begin
-                            r_qspi_sck_next     = ~r_qspi_sck   ;
-                            bit_ctr_next        = bit_ctr - 32'd1           ;
-                            r_qspi_fifo_next    = {4'b0, 8'h06,24'h000000}  ;
-                            r_qspi_cs_next      = (bit_ctr == 32'd452) ? 1'b1 : 1'b0; 
-                        end
-                        else if(bit_ctr > 392) begin
-                            r_qspi_sck_next     = ~r_qspi_sck   ;
-                            if(!r_qspi_sck) begin    
-                                bit_ctr_next        = bit_ctr - 32'd1           ;
-                                r_qspi_fifo_next    = {r_qspi_fifo[34:0],1'b0}  ;    
-                            end
-                        end
-                        
-                        else begin
-                            bit_ctr_next        = bit_ctr - 32'd1           ;
-                            r_qspi_fifo_next    = {36{1'b0}}    ;
-                            r_qspi_cs_next      = 1'b1          ;
-                            r_qspi_sck_next     = 1'b0          ;
-                        end
-                    end
-            end
-            
-            IDLE: 
-            begin
-                if(startup_sequence && (!i_reset)) begin
-                    state_next  = QSPI_START                ; 
-                    bit_ctr_next= 32'd501                   ;
-                    r_qspi_fifo_next= {4'b0, 8'h90,24'h000000} ;
-                end
-                else begin
-                    if((in_write)) begin //
-                        r_spd_next      = 1'b0              ;
-                        r_dir_next      = 1'b0              ;
-                        r_spd_nv        = in_spd            ;
-                        r_dir_nv        = in_dir            ;
-                        r_address_next  = in_address        ;
-                        r_qspi_cs_next  = 1'b0              ;
-                        r_op_cont_next  = in_op_cont        ; 
-                        r_qspi_sck_next = 1'b0              ; 
-                        
-                        if(in_spd) begin // Qspi write
-                            bit_ctr_next    = 32'd8         ;
-                            state_next      = QSPI_WREN     ;   // WREN -> WRR -> RDSR -> WREN -> SECTOR ERASE -> RDSR -> WREN-> SEND CMD -> WRITE -> RDSR
-                            r_qspi_fifo_next= { 4'b0, 8'h06,{24{1'b0}}} ; 
-                            
-                            if(!in_dir) begin // qspi read mode
-                                q_rd_flag_next  = 1'b1      ;        
-                            end
-                        end
-                        
-                        else if(!in_spd && in_dir) begin // Spi write
-                            state_next      = QSPI_WREN     ;
-                            erase_flag_next = 1'b1          ;        
-                            bit_ctr_next    = 32'd8         ;
-                            r_qspi_fifo_next= {4'b0, 8'h06,{24{1'b0}}} ;
-                        end
-                        
-                        else begin  // Spi read
-                            state_next      = SEND_CMD      ;       
-                            bit_ctr_next    = 32'd32        ;
-                            r_qspi_fifo_next= {4'b0, 8'h03,r_address_next}; 
-                        end 
-                        
-                    end
-                    else begin
-                        state_next      = IDLE          ;    
-                        r_qspi_cs_next  = 1'b1          ;
-                    end
-                end
-            end
-            
-            SEND_CMD:
-            begin
-                if( bit_ctr == 32'd0) begin
-                    r_qspi_sck_next = 1'b0          ;
-                    r_qspi_cs_next  = 1'b0          ;
-                    r_spd_next      = r_spd_v      ;
-                    r_dir_next      = r_dir_v      ; 
-                    // Diger degiskenleri ekle
-                    if((r_dir_v == 1'b0) && (r_spd_v == 1'b0)) begin 
-                        bit_ctr_next    = 32'd32    ;
-                        state_next      = SPI_READ  ;
-                       
-                    end
-                    else if((r_dir_v == 1'b0) && (r_spd_v == 1'b1)) begin   
-                        bit_ctr_next    = 32'd16    ;   // dummy + 8 cycles
-                        state_next      = QSPI_READ ;    
-                                            
-                    end
-                    else if((r_dir_v == 1'b1) && (r_spd_v == 1'b0)) begin
-                        bit_ctr_next    = 32'd32    ;   
-                        state_next      = SPI_WRITE ;
-                        r_qspi_fifo_next= in_word   ;
-                    end
-                    else if((r_dir_v == 1'b1) && (r_spd_v == 1'b1)) begin
-                        bit_ctr_next    = 32'd8     ;   // dummy + 8 cycles
-                        state_next      = QSPI_WRITE;
-                        r_qspi_fifo_next= in_word   ;
-                    end
-                end
-                else begin
-                    r_qspi_sck_next     = ~r_qspi_sck   ;
-                    r_dir_next          = 1'b0          ;
-                    r_spd_next          = 1'b0          ;
-                    state_next          = SEND_CMD                  ;
-                    if(!r_qspi_sck) begin    
-                        bit_ctr_next        = bit_ctr - 32'd1           ;
-                        
-                        r_qspi_fifo_next    = {r_qspi_fifo[34:0],1'b0}  ;    
-                    end
-                end
-            end
-            
-            SPI_READ:   // 9.1
-            begin
-                if(bit_ctr == 32'd0) begin
-                    r_out_word_next = r_qspi_fifo[32:1] ;
-                    if(in_op_cont) begin
-                        state_next      = SPI_READ      ;
-                        r_qspi_cs_next  = 1'b0          ;
-                        bit_ctr_next    = 32'd32        ;
-                        r_qspi_sck_next = ~r_qspi_sck   ;
-                    end
-                    else begin
-                        state_next      = IDLE          ;
-                        r_qspi_cs_next  = 1'b1          ;   // transaction ends
-                        r_qspi_sck_next = 1'b0          ;    
-                        r_dir_next      = 1'b0          ;
-                        r_spd_next      = 1'b0          ;  
-                    end
-                end
-                else begin
-                    r_qspi_sck_next = ~r_qspi_sck       ;
-                    state_next      = SPI_READ          ;
-                    r_op_cont_next  = in_op_cont        ;
-                    if(!r_qspi_sck) begin
-                        bit_ctr_next    = bit_ctr - 32'd1                       ;
-                        r_qspi_fifo_next= {r_qspi_fifo[34:0], io_qspi_data[1]}  ; // bitler fifoya kaydediliyor. // SO -> io_qspi_data[1]
-                        r_valid_next     = (bit_ctr == 1) ? 1 : 0    ;
-                    end         
-                end
-            end
-            
-            QSPI_READ:  // 9.4
-            begin
-                if(bit_ctr == 32'd0) begin
-                    r_out_word_next = r_qspi_fifo[32:1] ;   
-                    if(in_op_cont) begin
-                        state_next      = QSPI_READ     ;
-                        r_qspi_cs_next  = 1'b0          ;
-                        bit_ctr_next    = 32'd8         ;
-                    end
-                    else begin
-                        r_qspi_sck_next = 1'b0          ; 
-                        r_qspi_cs_next  = 1'b1          ;
-                        state_next      = IDLE          ;
-                        r_dir_next      = 1'b0          ;
-                        r_spd_next      = 1'b0          ;
-                    end
-                end           
-                else begin
-                    r_qspi_sck_next = ~r_qspi_sck       ;
-                    state_next      =  QSPI_READ        ;
-                    r_op_cont_next  = in_op_cont        ;
-                    if(!r_qspi_sck) begin
-                        bit_ctr_next    = bit_ctr - 32'd1;
-                        r_valid_next    = (bit_ctr == 1) ? 1 : 0    ;
-                        if(bit_ctr <= 8) begin // 8 cycle dummy 
-                            r_qspi_fifo_next= {r_qspi_fifo[31:0], io_qspi_data[3:0]};
-                        end
-                    end  
-                end
-            end
-            
-            QSPI_WREN:  // 9.9: yazma işlemlerinden once yapılmalı
-            begin
-                if(bit_ctr == 32'd0) begin
-                    r_qspi_sck_next = 1'b0              ;
-                    if(r_qspi_cs) begin         
-                        r_qspi_cs_next  = 1'b0              ;      
-                        if(erase_flag) begin
-                            erase_flag_next = 1'b0              ;
-                            state_next      =  QSPI_ERASE       ;
-                            bit_ctr_next    = 32'd32            ;
-                            r_qspi_fifo_next= {4'b0, 8'h20, r_address};
-                        end
-                        else if(write_flag) begin
-                            write_flag_next = 1'b0              ;
-                            state_next      = SEND_CMD          ;
-                            bit_ctr_next    = 32'd32            ;
-                            r_qspi_fifo_next= {4'b0, r_spd_v ? 8'h32 : 8'h02, r_address};         
-                        end
-                        else begin
-                            state_next      =  QSPI_WRR ;
-                            bit_ctr_next    =  32'd25   ;  
-                            r_qspi_fifo_next= {4'b0, 8'h01, 16'b0000_0010_0000_0010, {8{1'b0}}}    ;   // yanlis olabilir 
-                        end           
-                    end
-                    else begin
-                        r_qspi_cs_next  = 1'b1;
-                        state_next      = QSPI_WREN;
-                    end
-                end
-                else begin ///// 1 ms delay ekle
-                    state_next      =  QSPI_WREN    ; 
-                    r_qspi_sck_next = ~r_qspi_sck   ;  
-                    if(!r_qspi_sck) begin
-                        bit_ctr_next    = bit_ctr - 32'd1       ;
-                        r_qspi_fifo_next= {r_qspi_fifo[34:0],1'b0};   
-                    end
-                end
-            end
-            
-            QSPI_WRR:   // 9.13
-            begin
-                if(bit_ctr == 32'd0) begin
-                    r_qspi_sck_next = 1'b0          ;
-                    if(r_qspi_cs) begin
-                        if(r_dir_v)begin 
-                            wrr_flag_next   = 1'b1      ; 
-                        end
-                        else begin
-                            q_rd_flag_next  = 1'b1  ; 
-                        end
-                        r_qspi_cs_next  = 1'b0      ;
-                        bit_ctr_next    = 32'd16    ;   
-                        state_next      = QSPI_RDSR ;
-                        r_qspi_fifo_next= {4'b0,8'h05,{24{1'b0}}} ;  // rdsr command
-                    end
-                    else begin
-                        state_next      = QSPI_WRR  ;
-                        r_qspi_cs_next  = 1'b1      ;
-                    end       
-                end
-                else begin
-                    state_next      =  QSPI_WRR     ; 
-                    if(bit_ctr > 1) begin
-                        r_qspi_sck_next = ~r_qspi_sck   ;
-                        if(!r_qspi_sck) begin
-                            bit_ctr_next    = bit_ctr - 32'd1         ;
-                            r_qspi_fifo_next= {r_qspi_fifo[34:0],1'b0};   
-                        end
-                    end
-                    else begin
-                        if(bit_ctr == 1) begin
-                            r_qspi_cs_next = 1'b1;
-                        end
-                        bit_ctr_next = bit_ctr -1;
-                        r_qspi_sck_next= 1'b0     ;  // v1.3                  
-                    end
-                end
-            end
-            
-            QSPI_RDSR:  // 9.11
-            begin
-                if(bit_ctr == 32'd0) begin 
-                    if(r_qspi_fifo[0] == 1'b0) begin
-                            r_qspi_sck_next = 1'b0          ;
-                            if(r_qspi_cs) begin
-                                r_qspi_cs_next  = 1'b0          ;
-                                r_qspi_sck_next = 1'b0          ;
-                                if(wrr_flag) begin // wrr isleminden sonra
-                                    wrr_flag_next   = 1'b0      ;
-                                    state_next      = QSPI_WREN ;
-                                    erase_flag_next = 1'b1      ;
-                                    r_qspi_fifo_next= {4'b0, 8'h06,{24{1'b0}}} ;
-                                    bit_ctr_next    = 32'd8     ;  
-                                end     
-                                else if(write_flag) begin // QSPI_WRITE isleminden sonra
-                                    write_flag_next = 1'b0      ;
-                                    bit_ctr_next    = 32'd0     ;  
-                                    state_next      =  IDLE     ;   
-                                    r_qspi_cs_next  = 1'b1      ;
-                                end
-                                else if(erase_flag) begin  // erase isleminden sonra 
-                                    erase_flag_next = 1'b0      ;
-                                    state_next      = QSPI_WREN ;
-                                    write_flag_next = 1'b1      ;
-                                    r_qspi_fifo_next= {4'b0, 8'h06,{24{1'b0}}} ;
-                                    bit_ctr_next    = 32'd8     ;  
-                                end
-                                else if(q_rd_flag) begin
-                                    q_rd_flag_next  = 1'b0          ;
-                                    state_next      = SEND_CMD      ; 
-                                    r_qspi_sck_next = 1'b0          ;       
-                                    bit_ctr_next    = 32'd32        ;
-                                    r_qspi_fifo_next= {4'b0, 8'h6b, r_address_next};  
-                                end
-                            end
-                            else begin
-                                r_qspi_cs_next  = 1'b1;
-                                state_next      = QSPI_RDSR;
-                            end
-                        
-                    end
-                    else begin // eger 0 degilse okumaya devam et      //////// calısıyormu kontrol et
-                        r_qspi_sck_next = 1'b0              ;
-                        state_next      = QSPI_RDSR         ;
-                        r_qspi_fifo_next= {r_qspi_fifo[35:16],16'd0} ;
-                        bit_ctr_next    = 32'd8             ;      
-                    end
-                end
-                else begin
-                    r_qspi_sck_next = ~r_qspi_sck   ;
-                    state_next      =  QSPI_RDSR    ; 
-                    if((!r_qspi_sck) && (bit_ctr > 8)) begin
-                        bit_ctr_next    = bit_ctr - 32'd1       ;
-                        r_qspi_fifo_next= {r_qspi_fifo[34:0],1'b0};
-                    end
-                    else if((!r_qspi_sck) && (bit_ctr <= 8)) begin
-                        r_qspi_fifo_next  = {r_qspi_fifo[34:0], io_qspi_data[1]} ; // r_qspi_fifo ile yap
-                        bit_ctr_next        = bit_ctr - 32'd1                    ;  
-                    end 
-                end
-            end
-            
-            QSPI_ERASE: // 9.16
-            begin
-                if(bit_ctr == 32'd0) begin
-                    r_qspi_sck_next = 1'b0              ;
-                    if(r_qspi_cs) begin
-                        r_qspi_cs_next  = 1'b0          ;
-                        erase_flag_next = 1'b1          ;
-                        state_next      = QSPI_RDSR     ;
-                        bit_ctr_next    = 32'd16        ;   
-                        r_qspi_fifo_next= {4'b0, 8'h05,{24{1'b0}}} ;  // rdsr command   
-                    end
-                    else begin
-                        r_qspi_cs_next  = 1'b1          ;
-                        state_next      = QSPI_ERASE    ;
-                    end
-                end
-                else begin
-                    r_qspi_sck_next = ~r_qspi_sck       ;
-                    state_next      = QSPI_ERASE        ;
-                    if(!r_qspi_sck) begin
-                        bit_ctr_next    = bit_ctr - 32'd1   ;
-                        r_qspi_fifo_next= {r_qspi_fifo[34:0],1'b0};
-                    end  
-                end
-            end
-            
-            SPI_WRITE: // 9.14
-            begin
-                if(bit_ctr == 32'd0) begin  
-                    r_qspi_sck_next     = 1'b0      ;
-                    if(in_op_cont) begin
-                        r_qspi_cs_next  = 1'b0      ;   
-                        state_next      = SPI_WRITE ;
-                        bit_ctr_next    = 32'd32    ;
-                        r_qspi_fifo_next= {in_word,1'b0}   ;
-                    end
-                    else begin
-                        if(r_qspi_cs) begin
-                            r_qspi_cs_next  = 1'b0      ;
-                            write_flag_next = 1'b1      ;
-                            bit_ctr_next    = 32'd16    ;
-                            state_next      = QSPI_RDSR ;
-                            r_qspi_fifo_next= {4'b0, 8'h05,{24{1'b0}}} ;
-                        end
-                        else begin
-                            r_dir_next      = 1'b0      ;
-                            r_qspi_cs_next  = 1'b1      ;
-                            state_next      = SPI_WRITE ;
-                        end
-                    end
-                end
-                else begin
-                    r_qspi_sck_next     = ~r_qspi_sck   ;
-                    state_next          =  SPI_WRITE    ;
-                    r_op_cont_next      = in_op_cont    ;
-                    if(!r_qspi_sck) begin
-                       bit_ctr_next     = bit_ctr - 32'd1           ;
-                       r_qspi_fifo_next = {r_qspi_fifo[34:0],1'b0}  ;
-                       r_valid_next     = (bit_ctr == 1) ? 1 : 0    ; 
-                    end 
-                end
-            end
-            
-            QSPI_WRITE: // 9.15
-            begin
-                if(bit_ctr == 32'd0) begin
-                        r_qspi_sck_next = 1'b0          ;
-                        if(in_op_cont) begin
-                            r_qspi_cs_next  = 1'b0      ;   
-                            state_next      = QSPI_WRITE;
-                            bit_ctr_next    = 32'd8     ;
-                            r_qspi_fifo_next= in_word   ;
-                        end
-                        else begin
-                            if(r_qspi_cs) begin
-                                r_qspi_cs_next  = 1'b0      ;
-                                write_flag_next = 1'b1      ;
-                                bit_ctr_next    = 32'd16    ;
-                                state_next      = QSPI_RDSR ;
-                                r_qspi_fifo_next= {4'b0, 8'h05,{24{1'b0}}} ;
-                            end
-                            else begin
-                                r_dir_next      = 1'b0      ;
-                                r_spd_next      = 1'b0      ;
-                                r_qspi_cs_next  = 1'b1      ;
-                                state_next      = QSPI_WRITE ;
-                            end
-                        end
-                end
-                else begin
-                    r_qspi_sck_next     = ~r_qspi_sck   ;
-                    state_next          =  QSPI_WRITE   ;
-                    r_op_cont_next      = in_op_cont    ;
-                    if(!r_qspi_sck) begin
-                       bit_ctr_next     = bit_ctr - 32'd1           ;
-                       r_qspi_fifo_next = {r_qspi_fifo[31:0],4'd0}  ;
-                       r_valid_next     = (bit_ctr == 1) ? 1 : 0    ; 
-                    end 
-                end
-            end
-            endcase
-        end      
-    end
+  ////*****************************
+  //  
+	//// The following primitive is necessary in many designs order to gain
+	//// access to the o_qspi_sck pin.  It's not necessary on the Arty,
+	//// simply because they provide two pins that can drive the QSPI
+	//// clock pin.
+	wire	[3:0]	su_nc;	// Startup primitive, no connect
+  STARTUPE2 #(
+		// Leave PROG_USR false to avoid activating the program
+		// event security feature.  Notes state that such a feature
+		// requires encrypted bitstreams.
+		.PROG_USR("FALSE"),
+		// Sets the configuration clock frequency (in ns) for
+		// simulation.
+		.SIM_CCLK_FREQ(0.0)
+	) STARTUPE2_inst (
+	// CFGCLK, 1'b output: Configuration main clock output -- no connect
+	.CFGCLK(su_nc[0]),
+	// CFGMCLK, 1'b output: Configuration internal oscillator clock output
+	.CFGMCLK(su_nc[1]),
+	// EOS, 1'b output: Active high output indicating the End Of Startup.
+	.EOS(su_nc[2]),
+	// PREQ, 1'b output: PROGRAM request to fabric output
+	//	Only enabled if PROG_USR is set.  This lets the fabric know
+	//	that a request has been made (either JTAG or pin pulled low)
+	//	to program the device
+	.PREQ(su_nc[3]),
+	// CLK, 1'b input: User start-up clock input
+	.CLK(1'b0),
+	// GSR, 1'b input: Global Set/Reset input
+	.GSR(1'b0),
+	// GTS, 1'b input: Global 3-state input
+	.GTS(1'b0),
+	// KEYCLEARB, 1'b input: Clear AES Decrypter Key input from BBRAM
+	.KEYCLEARB(1'b0),
+	// PACK, 1-bit input: PROGRAM acknowledge input
+	//	This pin is only enabled if PROG_USR is set.  This allows the
+	//	FPGA to acknowledge a request for reprogram to allow the FPGA
+	//	to get itself into a reprogrammable state first.
+	.PACK(1'b0),
+	// USRCLKO, 1-bit input: User CCLK input -- This is why I am using this
+	// module at all.
+	.USRCCLKO(out_qspi_sck),
+	// USRCCLKTS, 1'b input: User CCLK 3-state enable input
+	//	An active high here places the clock into a high impedence
+	//	state.  Since we wish to use the clock as an active output
+	//	always, we drive this pin low.
+	.USRCCLKTS(1'b0),
+	// USRDONEO, 1'b input: User DONE pin output control
+	//	Set this to "high" to make sure that the DONE LED pin is
+	//	high.
+	.USRDONEO(1'b1),
+	// USRDONETS, 1'b input: User DONE 3-state enable output
+	//	This enables the FPGA DONE pin to be active.  Setting this
+	//	active high sets the DONE pin to high impedence, setting it
+	//	low allows the output of this pin to be as stated above.
+	.USRDONETS(1'b1)
+	);
+  //  //*****************************
+    
+    
+   
     
     always@(posedge i_clk) begin
         if(i_reset) begin
-            clock_ctr   <= `PRESCALE - 32'd1;
-            bit_ctr     <= 32'd0            ;
-            state       <= IDLE             ;
-            
-            erase_flag  <= 1'b0             ;
-            write_flag  <= 1'b0             ;
-            wrr_flag    <= 1'b0             ;
-            write_flag  <= 1'b0             ;
-            q_rd_flag   <= 1'b0             ;
-            
-            startup_sequence <= 1'b1        ;
-            
-            r_spd       <= 1'b0             ;
-            r_dir       <= 1'b0             ;
-            r_valid     <= 1'b0             ;
-            
-            r_address   <= 32'd0            ;
-            r_out_word  <= 32'd0            ;
-            r_op_cont   <= 1'b0             ;    
-            
-            r_qspi_cs   <= 1'b1             ;
-            r_qspi_sck  <= 1'b0             ;
-            r_qspi_fifo <= 36'd0            ;  
-            
-            r_qspi_sr <= 1'b0               ;
-            
-            r_dir_v <= 1'b0                 ;
-            r_spd_v <= 1'b0                 ;
-              
+            counter = 0;
+            t_state = 12'h001;
         end
+        
         else begin
-            clock_ctr   <= clock_ctr_next   ;
-            bit_ctr     <= bit_ctr_next     ;
-            state       <=  state_next      ;
+        case(t_state) 
+        
+        12'h001: // spi write
+        begin
+            t_state = 12'h001;
+            in_write = 0;
+            in_erase = 1;
+            i_dir = 1;
+            i_spd = 0;
+            in_address = 24'h00f000;
+            in_op_cont = 0;
+            in_word = 32'ha5a5a5a5;
+            if(out_valid) begin
+                counter = counter + 1;
+                if(counter == 5) begin
+                    t_state = 12'h002; 
+                end
+            end    
+        end
+        
+        12'h002: // spi read
+        begin
+            t_state = 12'h002;
+            in_write = 1;
+            i_dir = 0;
+            i_spd = 1;
+            in_address = 24'h00f000; 
+            in_op_cont = 0;
+         
+            if(out_valid) begin
+                counter = counter + 1;
+                if(counter == 5) begin
+                    t_state = 12'h004; 
+                end
+            end   
+        end
+        
+        12'h004: // spi read
+        begin
+            t_state = 12'h004;
+            in_write = 1;
+            i_dir = 0;
+            i_spd = 0;
+            in_address = 24'h00f000;  //
+            in_op_cont = 0;
+            in_word = 32'd67;
+            if(out_valid) begin
+                counter = counter + 1;
+                if(counter == 5) begin
+                    t_state = 12'h008; 
+                end
+            end    
+        end
+        
+        12'h008: // spi read
+        begin
+            t_state = 12'h008;
+            in_write = 1;
+            i_dir = 1;
+            i_spd = 1;
+            in_address = 24'h0aa000;
+            in_op_cont = 1;
+            in_word = 32'd67;
             
-            erase_flag  <= erase_flag_next  ;
-            write_flag  <= write_flag_next  ;
-            wrr_flag    <= wrr_flag_next    ;
-            write_flag  <= write_flag_next  ;
-            q_rd_flag   <= q_rd_flag_next   ;
             
-            startup_sequence <= startup_sequence_next;
-            
-            r_dir       <= r_dir_next       ;
-            r_spd       <= r_spd_next       ;
-            
-            r_qspi_cs   <= r_qspi_cs_next   ;
-            r_qspi_sck  <= r_qspi_sck_next  ;
-            
-            
-            r_out_word  <= r_out_word_next  ;
-            r_valid     <= r_valid_next     ;
-            r_op_cont   <= r_op_cont_next   ;
-            
-            r_qspi_fifo <= r_qspi_fifo_next ;
-            
-            r_address   <= r_address_next   ;
-            
-            r_qspi_sr   <= r_qspi_sr_next   ;
-            
-            r_dir_v <= r_dir_nv             ;
-            r_spd_v <= r_spd_nv             ;
-            
+            if(out_valid) begin
+                counter = counter + 1;
+                if(counter == 15) begin
+                    t_state = 12'h001; 
+                end
+            end    
+        end
+        
+        endcase
         end
     end
-         
-  
-    
-    
-    
-    
-     
+                                                                 
     
 endmodule
