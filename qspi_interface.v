@@ -34,11 +34,10 @@ module qspi_interface(
     // Flash Controller i/o
     inout  [3:0]        io_qspi_data,
     output              out_qspi_cs,
-    input               out_qspi_sck
+    output              out_qspi_sck
     );
     
  reg               i_dir,       i_dir_next;
- reg               i_spd,       i_spd_next;
  reg               in_start,    in_start_next;
  reg [23:0]        in_address,  in_address_next;
  reg [31:0]        in_word,     in_word_next;
@@ -55,8 +54,7 @@ module qspi_interface(
  
  (*dont_touch = "true"*) wire out_busy;
  
- (*dont_touch = "true"*)wire in_axisync;
- assign in_axisync = t_state[0];
+ //assign in_axisync = t_state[0];
  
   LLC_AXI LLC(
    .i_clk(ACLK)  ,       
@@ -69,8 +67,7 @@ module qspi_interface(
    .in_dir(i_dir),
    .in_erase(in_erase),                                                            
    .out_word(out_word),                                                          
-   .out_valid(out_valid), 
-   .in_axisync(in_axisync),                                                                                                                 
+   .out_valid(out_valid),                                                                                                                  
    .out_busy(out_busy),                                                                   
    .io_qspi_data(io_qspi_data),                                                      
    .out_qspi_cs(out_qspi_cs),
@@ -96,7 +93,6 @@ module qspi_interface(
     always@* begin
         clock_ctr_next      = clock_ctr ;
         i_dir_next          = i_dir     ;
-        i_spd_next          = i_spd     ;
         in_start_next       = in_start  ;
         in_address_next     = in_address;
         in_word_next        = in_word   ;
@@ -150,7 +146,6 @@ module qspi_interface(
                 if(out_valid) begin
                     t_state_next    = 12'h001   ; 
                     i_dir_next      = 1'b0      ;         
-                    in_start_next   = 1'b0      ;
                     in_erase_next   = 1'b0      ;
                     in_address_next = 24'd0     ;
                     clock_ctr_next  = 32'd0     ;    
@@ -158,6 +153,7 @@ module qspi_interface(
                 else begin
                     t_state_next    = 12'h002           ;
                     clock_ctr_next  = `PRESCALE - 32'd1 ;
+                    in_start_next   = 1'b0              ;
                 end
             end
             endcase
@@ -167,8 +163,7 @@ module qspi_interface(
     always@(posedge ACLK) begin
         if(ARESET) begin
             clock_ctr      <= 32'd0 ;
-            i_dir          <= 1'b0  ;
-            i_spd          <= 1'b0  ;    
+            i_dir          <= 1'b0  ;   
             in_start       <= 1'b0  ;     
             in_address     <= 24'd0 ;  
             in_word        <= 32'd0 ;
@@ -177,8 +172,7 @@ module qspi_interface(
         end
         else begin
             clock_ctr      <= clock_ctr_next ;
-            i_dir          <= i_dir_next     ;
-            i_spd          <= i_spd_next     ;    
+            i_dir          <= i_dir_next     ;   
             in_start       <= in_start_next  ;     
             in_address     <= in_address_next;  
             in_word        <= in_word_next   ;
