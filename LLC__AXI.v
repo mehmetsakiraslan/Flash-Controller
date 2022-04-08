@@ -18,7 +18,6 @@ input                in_dir,         // 0 -> read, 1 -> write
 input                in_erase,       
 output [31:0]        out_word,       // Read modda flashtan okunan veri
 output               out_valid,
-(*dont_touch = "true"*)input                in_axisync, // bu sinyal muhtemelen gereksiz.
 (*dont_touch = "true"*)output               out_busy,
 
 // Flash Cihaz�na Ba�l� Giri�/��k��lar
@@ -110,9 +109,7 @@ input [31:0]        in_clock_ctr
         
         r_qspi_sr_next  = r_qspi_sck        ;
         
-        //if(r_valid && in_axisync) begin
-        //    r_valid_next = 1'b0             ; 
-        //end
+        
         
         if(in_clock_ctr == 32'd0) begin
              
@@ -626,12 +623,5 @@ input [31:0]        in_clock_ctr
             
         end
     end
-         
-  
-    
-    
-    
-    
-     
     
 endmodule
