@@ -67,8 +67,8 @@ input [31:0]        in_clock_ctr
             
     // Kontrol Sinyalleri
     reg [31:0]  bit_ctr  , bit_ctr_next     ;  
-(*dont_touch = "true"*)    reg [15:0]  state;
-(*dont_touch = "true"*)    reg [15:0]  state_next                  ;           
+    reg [15:0]  state;
+    reg [15:0]  state_next                  ;           
     reg         erase_flag, erase_flag_next ;
     reg         write_flag, write_flag_next ;
     reg         wrr_flag, wrr_flag_next     ;
@@ -142,7 +142,7 @@ input [31:0]        in_clock_ctr
                         else if(bit_ctr > 400) begin
                             r_qspi_sck_next     = ~r_qspi_sck               ;
                             bit_ctr_next        = bit_ctr - 32'd1           ;
-                            r_qspi_fifo_next    = {4'b0, 8'h06,24'h000000}  ;
+                            r_qspi_fifo_next    = {4'h0, 8'h06,24'h000000}  ;
                             r_qspi_cs_next      = (bit_ctr == 32'd452) ? 1'b1 : 1'b0; 
                         end
                         else if(bit_ctr > 392) begin
@@ -167,7 +167,7 @@ input [31:0]        in_clock_ctr
                 if(startup_sequence && (!i_reset)) begin
                     state_next  = QSPI_START                ; 
                     bit_ctr_next= 32'd501                   ;
-                    r_qspi_fifo_next= {4'b0, 8'h90,24'h000000} ;
+                    r_qspi_fifo_next= {4'h0, 8'h90,24'h000000} ;
                 end
                 else begin
                     
@@ -202,7 +202,7 @@ input [31:0]        in_clock_ctr
                         else begin                                          // Spi read  || SEND CMD -> SPI READ 
                             state_next      = SEND_CMD      ;       
                             bit_ctr_next    = 32'd32        ;
-                            r_qspi_fifo_next= {4'b0, 8'h03,r_address_next}; 
+                            r_qspi_fifo_next= {4'b0, 8'h03,r_address}; 
                         end 
                     end
                     else begin
@@ -421,7 +421,7 @@ input [31:0]        in_clock_ctr
                                     state_next      = SEND_CMD      ; 
                                     r_qspi_sck_next = 1'b0          ;       
                                     bit_ctr_next    = 32'd32        ;
-                                    r_qspi_fifo_next= {4'b0, 8'h6b, r_address_next};  
+                                    r_qspi_fifo_next= {4'b0, 8'h6b, r_address};  
                                 end
                             end
                             else begin
