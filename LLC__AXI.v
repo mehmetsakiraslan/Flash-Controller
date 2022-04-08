@@ -18,7 +18,7 @@ input                in_dir,         // 0 -> read, 1 -> write
 input                in_erase,       
 output [31:0]        out_word,       // Read modda flashtan okunan veri
 output               out_valid,
-(*dont_touch = "true"*)input                in_axisync,
+(*dont_touch = "true"*)input                in_axisync, // bu sinyal muhtemelen gereksiz.
 (*dont_touch = "true"*)output               out_busy,
 
 // Flash Cihaz�na Ba�l� Giri�/��k��lar
@@ -68,7 +68,8 @@ input [31:0]        in_clock_ctr
             
     // Kontrol Sinyalleri
     reg [31:0]  bit_ctr  , bit_ctr_next     ;  
-    reg [15:0]  state    , state_next       ; 
+(*dont_touch = "true"*)    reg [15:0]  state;
+(*dont_touch = "true"*)    reg [15:0]  state_next                  ;           
     reg         erase_flag, erase_flag_next ;
     reg         write_flag, write_flag_next ;
     reg         wrr_flag, wrr_flag_next     ;
@@ -109,9 +110,9 @@ input [31:0]        in_clock_ctr
         
         r_qspi_sr_next  = r_qspi_sck        ;
         
-        if(r_valid && in_axisync) begin
-            r_valid_next = 1'b0             ; 
-        end
+        //if(r_valid && in_axisync) begin
+        //    r_valid_next = 1'b0             ; 
+        //end
         
         if(in_clock_ctr == 32'd0) begin
              
@@ -172,6 +173,7 @@ input [31:0]        in_clock_ctr
                     r_qspi_fifo_next= {4'b0, 8'h90,24'h000000} ;
                 end
                 else begin
+                    
                     if((in_start)) begin //
                         r_spd_next      = 1'b0              ;
                         r_dir_next      = 1'b0              ;
@@ -209,6 +211,7 @@ input [31:0]        in_clock_ctr
                     else begin
                         state_next      = IDLE          ;    
                         r_qspi_cs_next  = 1'b1          ;
+                        r_valid_next    = 1'b0          ; 
                     end
                 end
             end
@@ -255,7 +258,7 @@ input [31:0]        in_clock_ctr
             SPI_READ:   // 9.1
             begin
                 if(bit_ctr == 32'd0) begin
-                    r_out_word_next = r_qspi_fifo[32:1] ;
+                    r_out_word_next = r_qspi_fifo[31:0] ;
                     if(in_op_cont) begin
                         state_next      = SPI_READ      ;
                         r_qspi_cs_next  = 1'b0          ;
@@ -285,20 +288,26 @@ input [31:0]        in_clock_ctr
             QSPI_READ:  // 9.4
             begin
                 if(bit_ctr == 32'd0) begin
-                    r_out_word_next = r_qspi_fifo[35:4] ; 
+                    r_out_word_next = r_qspi_fifo[31:0] ; 
                     if(in_op_cont) begin
                         state_next      = QSPI_READ     ;
                         r_qspi_cs_next  = 1'b0          ;
                         bit_ctr_next    = 32'd8         ;
                     end
                     else begin
-                        r_qspi_sck_next = 1'b0          ; 
-                        r_qspi_cs_next  = 1'b1          ;
-                        r_valid_next    = 1'b1          ; 
-                        state_next      = IDLE          ;
-                        r_dir_next      = 1'b0          ;
-                        r_spd_next      = 1'b0          ;
+                        if(r_valid) begin
+                            r_qspi_sck_next = 1'b0          ; 
+                            r_qspi_cs_next  = 1'b1          ;
+                            r_valid_next    = 1'b0          ; 
+                            state_next      = IDLE          ;
+                            r_dir_next      = 1'b0          ;
+                            r_spd_next      = 1'b0          ;
+                        end
+                        else begin
+                            r_valid_next    = 1'b1      ;
+                        end
                     end
+                    
                 end           
                 else begin
                     r_qspi_sck_next = ~r_qspi_sck       ;
@@ -391,6 +400,7 @@ input [31:0]        in_clock_ctr
                             if(r_qspi_cs) begin
                                 r_qspi_cs_next  = 1'b0          ;
                                 r_qspi_sck_next = 1'b0          ;
+                                r_valid_next    = 1'b0          ; 
                                 if(wrr_flag) begin // wrr isleminden sonra, QSPI write
                                     wrr_flag_next   = 1'b0      ;
                                     state_next      = QSPI_WREN ;
@@ -400,14 +410,12 @@ input [31:0]        in_clock_ctr
                                 end     
                                 else if(write_flag) begin // QSPI_WRITE isleminden sonra
                                     write_flag_next = 1'b0      ;
-                                   
-                                    r_valid_next    = 1'b1      ;   
                                     state_next      =  IDLE     ;   
                                     r_qspi_cs_next  = 1'b1      ;
                                 end
                                 else if(erase_flag) begin  // erase isleminden sonra IDLE'a geri done
                                     erase_flag_next = 1'b0      ;
-                                    r_valid_next    = 1'b1      ;
+ 
                                     state_next      = IDLE      ;
                                     r_qspi_cs_next  = 1'b1      ;
                                 end
@@ -422,6 +430,9 @@ input [31:0]        in_clock_ctr
                             else begin
                                 r_qspi_cs_next  = 1'b1;
                                 state_next      = QSPI_RDSR;
+                                if(erase_flag || write_flag) begin
+                                    r_valid_next    = 1'b1      ;
+                                end
                             end
                     end
                     else begin // eger 0 degilse okumaya devam et      //////// cal�s�yormu kontrol et
