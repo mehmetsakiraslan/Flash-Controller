@@ -10,29 +10,27 @@ module qspi_interface(
     // Write Address Channel
     input [31:0]                AWADDR,
     input                       AWVALID,
-    input [2:0]                 AWPROT,
     output                      AWREADY,    //+
     // Write Data Channel
     input [31:0]                WDATA,
-    input [3:0]                 WSTRB,
     input                       WVALID,
     output                      WREADY,     //+
     // Write Response Channel // Store, erase buradan gelcek
     input                       BREADY,
     output                      BVALID,     //+
-    output [1:0]                BRESP,      //+
     // Read Address Channel
     input [31:0]                ARADDR,     // adresin en anlamli 8 biti hangi islemin gerceklestirilecegine karar vermek icin kullaniliyor 
     input                       ARVALID,
-    input [2:0]                 ARPROT,
     output                      ARREADY,    //+
     // Read Data Channel // Load // read buradan gelcek
     input                       RREADY,
     output [31:0]               RDATA,      //+
     output                      RVALID,     //+
-    output [1:0]                RRESP,       //+
     // Flash Controller i/o
-    inout  [3:0]        io_qspi_data,
+    //inout  [3:0]        io_qspi_data,
+    output [3:0]        out_qspi_data,
+    input  [3:0]        in_qspi_data,
+    output [3:0]        t_qspi_data,    // t_qspi_data==0 -> okuma
     output              out_qspi_cs,
     output              out_qspi_sck
     );
@@ -69,7 +67,10 @@ module qspi_interface(
    .out_word(out_word),                                                          
    .out_valid(out_valid),                                                                                                                  
    .out_busy(out_busy),                                                                   
-   .io_qspi_data(io_qspi_data),                                                      
+   //.io_qspi_data(io_qspi_data), 
+   .out_qspi_data(out_qspi_data),
+   .in_qspi_data(in_qspi_data),
+   .t_qspi_data(t_qspi_data),                                                     
    .out_qspi_cs(out_qspi_cs),
    .out_qspi_sck(out_qspi_sck),     
    .in_clock_ctr(clock_ctr)                                             
@@ -84,8 +85,6 @@ module qspi_interface(
     assign RVALID   = (!i_dir) && (!in_erase) && out_valid; // read data channel
     assign RDATA    = out_word; // Dogru mu?
     
-    assign RRESP    = 2'b00;
-    assign BRESP    = 2'b00;
     
     assign BVALID   = (i_dir) && (!in_erase) && out_valid;    // write response channel
  
