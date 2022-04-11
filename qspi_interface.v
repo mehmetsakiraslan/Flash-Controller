@@ -107,7 +107,7 @@ module qspi_interface(
             
             12'h001: // IDLE
             begin
-                if ((~out_busy)&& (AWADDR[25] || AWADDR[26])) begin // ERASE
+                if ((~out_busy)&& (AWADDR[25] || AWADDR[26]) && WVALID && AWVALID) begin // ERASE
                     t_state_next    = 12'h002           ;
                     i_dir_next      = AWADDR[26] ? 1:0  ;         
                     in_start_next   = 1'b1              ;
@@ -116,7 +116,7 @@ module qspi_interface(
                     clock_ctr_next  = `PRESCALE - 32'd1 ;
                 end
                 
-                else if((~out_busy)&& AWADDR[24] && WVALID) begin // Write Data //////WVALID -> write valid
+                else if((~out_busy)&& AWADDR[24] && WVALID && AWVALID) begin // Write Data //////WVALID -> write valid
                     t_state_next    = 12'h002       ;
                     i_dir_next      = 1'b1          ;
                     in_start_next   = 1'b1          ;
